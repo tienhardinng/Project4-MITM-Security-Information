@@ -18,6 +18,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,9 +114,18 @@ fun sendLoginRequest(
 ) {
     val url = "https://10.0.2.2:3000/api/login"
 
-    // ⚠️ LỖ HỔNG: Bỏ qua hostname verification
-    // Burp CA đã được cài vào User store → MITM thành công
+    // ⚠️ LỖ HỔNG CỐ Ý: Trust ALL certificates kể cả chứng chỉ giả
+    val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+    })
+
+    val sslContext = SSLContext.getInstance("SSL")
+    sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+
     val client = OkHttpClient.Builder()
+        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
         .hostnameVerifier { _, _ -> true }
         .build()
 
@@ -131,7 +144,7 @@ fun sendLoginRequest(
 
     client.newCall(request).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            onResult("Lỗi kết nối: ${e.message}")
+            onResult("Lỗi: ${e.message}")
         }
 
         override fun onResponse(call: Call, response: Response) {
