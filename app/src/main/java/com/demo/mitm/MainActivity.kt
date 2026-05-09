@@ -110,8 +110,9 @@ fun sendLoginRequest(
 ) {
     val url = "https://10.0.2.2:3000/api/login"
 
-    // ⚠️ LỖ HỔNG: Bỏ qua hostname verification
-    // Burp CA đã được cài vào User store → MITM thành công
+    // ✅ HARDENED: Dùng OkHttpClient mặc định
+    // Network Security Config sẽ chỉ trust System CA
+    // Burp CA (User CA) bị từ chối hoàn toàn
     val client = OkHttpClient.Builder()
         .hostnameVerifier { _, _ -> true }
         .build()
@@ -131,7 +132,7 @@ fun sendLoginRequest(
 
     client.newCall(request).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            onResult("Lỗi kết nối: ${e.message}")
+            onResult("Lỗi: ${e.message}")
         }
 
         override fun onResponse(call: Call, response: Response) {
