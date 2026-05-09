@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -40,6 +41,7 @@ fun LoginScreen() {
     var password by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -82,6 +84,7 @@ fun LoginScreen() {
                 sendLoginRequest(
                     username = username,
                     password = password,
+                    context = context,
                     onResult = { msg ->
                         statusMessage = msg
                         isLoading = false
@@ -110,6 +113,7 @@ fun LoginScreen() {
 fun sendLoginRequest(
     username: String,
     password: String,
+    context: android.content.Context,
     onResult: (String) -> Unit
 ) {
     val url = "https://10.0.2.2:3000/api/login"
@@ -148,6 +152,17 @@ fun sendLoginRequest(
         }
 
         override fun onResponse(call: Call, response: Response) {
+            val responseBody = response.body?.string()
+            val json = JSONObject(responseBody ?: "{}")
+            val token = json.optString("token", "")
+
+            // ⚠️ LỖ HỔNG CỐ Ý: Lưu token plaintext vào file
+            if (token.isNotEmpty()) {
+                val file = java.io.File(context.filesDir, "token.txt")
+                file.writeText(token)
+                Log.d("DEBUG", "Token saved: $token")
+            }
+
             onResult("Đăng nhập thành công!")
         }
     })
