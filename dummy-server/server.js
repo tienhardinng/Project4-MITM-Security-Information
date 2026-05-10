@@ -9,7 +9,9 @@ app.use(express.json());
 
 app.post('/api/login', (req, res) => {
     console.log('[SERVER] Received credentials:', req.body);
-    res.json({ status: 'ok', message: 'Login received' });
+    const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRtaW4ifQ.secret123';
+    console.log('[SERVER] Issuing token:', token);
+    res.json({ status: 'ok', message: 'Login received', token: token });
 });
 
 // Dùng cert cố định - chỉ generate 1 lần
