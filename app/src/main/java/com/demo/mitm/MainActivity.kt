@@ -4,32 +4,86 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.io.IOException
+import java.io.File
 import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
+import javax.net.ssl.*
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                LoginScreen()
+        if (isRooted())   Log.w("SECURITY", "Root detected!")
+        if (isProxySet()) Log.w("SECURITY", "Proxy detected!")
+        setContent { MaterialTheme { LoginScreen() } }
+    }
+
+    private fun isRooted(): Boolean =
+        listOf("/sbin/su", "/system/bin/su", "/system/xbin/su",
+            "/system/app/Superuser.apk").any { File(it).exists() }
+
+    private fun isProxySet(): Boolean =
+        !System.getProperty("http.proxyHost").isNullOrBlank()
+
+    private fun getUnsafeClient(): OkHttpClient {
+        val trust = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(c: Array<X509Certificate>, a: String) {}
+            override fun checkServerTrusted(c: Array<X509Certificate>, a: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+        val ctx = SSLContext.getInstance("SSL").apply { init(null, trust, null) }
+        return OkHttpClient.Builder()
+            .sslSocketFactory(ctx.socketFactory, trust[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .build()
+    }
+
+    fun login(user: String, pass: String, onResult: (Boolean, String) -> Unit) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val body = JSONObject()
+                    .put("username", user)
+                    .put("password", pass)
+                    .toString()
+                    .toRequestBody("application/json".toMediaType())
+
+                val req = Request.Builder()
+                    .url("https://10.0.2.2:3000/api/login")
+                    .post(body).build()
+
+                val resp     = getUnsafeClient().newCall(req).execute()
+                val respBody = resp.body?.string() ?: ""
+                val json     = JSONObject(respBody)
+
+                if (json.optString("status") == "ok") {
+                    val token = json.optString("token")
+                    File(filesDir, "token.txt").writeText(token)
+                    Log.d("STORAGE", "Token saved plaintext!")
+                    withContext(Dispatchers.Main) { onResult(true, token) }
+                } else {
+                    withContext(Dispatchers.Main) { onResult(false, "Invalid credentials") }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onResult(false, e.message ?: "Error") }
             }
         }
     }
@@ -37,133 +91,148 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun LoginScreen() {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var statusMessage by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    val context = LocalContext.current
+    val activity = androidx.compose.ui.platform.LocalContext.current as MainActivity
+    var username  by remember { mutableStateOf("admin") }
+    var password  by remember { mutableStateOf("Secret@123") }
+    var status    by remember { mutableStateOf("") }
+    var token     by remember { mutableStateOf("") }
+    var isOk      by remember { mutableStateOf(false) }
+    var loading   by remember { mutableStateOf(false) }
+
+    val green  = Color(0xFF16A34A)
+    val red    = Color(0xFFDC2626)
+    val blue   = Color(0xFF1D4ED8)
+    val gray50 = Color(0xFFF8FAFC)
+    val gray200= Color(0xFFE2E8F0)
+    val gray600= Color(0xFF475569)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.White)
             .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "MITM Demo Login",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
 
+        // ── Header ──
+        Text("🔐", fontSize = 48.sp)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Secure Banking App",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF0F172A)
+        )
+        Text(
+            "MITM Demo — Project 4",
+            fontSize = 12.sp,
+            color = gray600
+        )
+        Spacer(Modifier.height(32.dp))
+
+        // ── Username ──
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
             label = { Text("Username") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp)
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp)
         )
+        Spacer(Modifier.height(12.dp))
 
+        // ── Password ──
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             label = { Text("Password") },
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 24.dp)
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp)
         )
+        Spacer(Modifier.height(20.dp))
 
+        // ── Login Button ──
         Button(
             onClick = {
-                isLoading = true
-                statusMessage = "Đang gửi..."
-                Log.d("DEBUG", "User typed password: $password")
-                sendLoginRequest(
-                    username = username,
-                    password = password,
-                    context = context,
-                    onResult = { msg ->
-                        statusMessage = msg
-                        isLoading = false
-                    }
-                )
+                loading = true
+                status  = "Connecting..."
+                token   = ""
+                activity.login(username, password) { ok, msg ->
+                    loading = false
+                    isOk    = ok
+                    status  = if (ok) "✓ Login successful" else "✗ $msg"
+                    if (ok) token = msg
+                }
             },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = blue),
+            enabled = !loading
         ) {
-            Text(if (isLoading) "Đang xử lý..." else "Login")
+            if (loading)
+                CircularProgressIndicator(
+                    color = Color.White,
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+            else
+                Text("Login", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
 
-        if (statusMessage.isNotEmpty()) {
-            Text(
-                text = statusMessage,
-                modifier = Modifier.padding(top = 16.dp),
-                color = if (statusMessage.contains("thành công"))
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.error
-            )
-        }
-    }
-}
-
-fun sendLoginRequest(
-    username: String,
-    password: String,
-    context: android.content.Context,
-    onResult: (String) -> Unit
-) {
-    val url = "https://10.0.2.2:3000/api/login"
-
-    // ⚠️ LỖ HỔNG CỐ Ý: Trust ALL certificates kể cả chứng chỉ giả
-    val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-    })
-
-    val sslContext = SSLContext.getInstance("SSL")
-    sslContext.init(null, trustAllCerts, java.security.SecureRandom())
-
-    val client = OkHttpClient.Builder()
-        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-        .hostnameVerifier { _, _ -> true }
-        .build()
-
-    val json = JSONObject().apply {
-        put("username", username)
-        put("password", password)
-    }
-
-    val body = json.toString()
-        .toRequestBody("application/json".toMediaType())
-
-    val request = Request.Builder()
-        .url(url)
-        .post(body)
-        .build()
-
-    client.newCall(request).enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) {
-            onResult("Lỗi: ${e.message}")
-        }
-
-        override fun onResponse(call: Call, response: Response) {
-            val responseBody = response.body?.string()
-            val json = JSONObject(responseBody ?: "{}")
-            val token = json.optString("token", "")
-
-            // ⚠️ LỖ HỔNG CỐ Ý: Lưu token plaintext vào file
-            if (token.isNotEmpty()) {
-                val file = java.io.File(context.filesDir, "token.txt")
-                file.writeText(token)
-                Log.d("DEBUG", "Token saved: $token")
+        // ── Status ──
+        if (status.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (isOk) green.copy(alpha = 0.08f) else red.copy(alpha = 0.08f),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .border(1.dp,
+                        if (isOk) green.copy(alpha = 0.3f) else red.copy(alpha = 0.3f),
+                        RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    status,
+                    color = if (isOk) green else red,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp
+                )
             }
-
-            onResult("Đăng nhập thành công!")
         }
-    })
+
+        // ── Token box (hiện sau login thành công) ──
+        if (token.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(gray50, RoundedCornerShape(8.dp))
+                    .border(1.dp, gray200, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    "⚠ Token lưu plaintext (files/token.txt)",
+                    fontSize = 11.sp,
+                    color = Color(0xFFEA580C),
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    token,
+                    fontSize = 11.sp,
+                    color = gray600,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
