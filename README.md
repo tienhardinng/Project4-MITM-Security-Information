@@ -1,519 +1,423 @@
-# 🔐 Project 4 — Android MITM Attack Lab
+# 🔐 Project 4 — Android MITM & Token Theft Lab
 
-> **Academic Security Demo** | OWASP Mobile Top 10 - M3: Insecure Communication
+> **Academic Security Demo** | OWASP Mobile Top 10: M3 · M4 · M9
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
 [![Android](https://img.shields.io/badge/Android-API%2029+-brightgreen.svg)](https://developer.android.com)
 [![Burp Suite](https://img.shields.io/badge/Burp%20Suite-Community-orange.svg)](https://portswigger.net)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
-- [Project Structure](#-project-structure)
+- [Repository Structure](#-repository-structure)
 - [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Demo Flow](#-demo-flow)
+- [Setup Guide](#-setup-guide)
+- [Demo Walkthrough](#-demo-walkthrough)
+- [Attack Mechanics](#-attack-mechanics)
+- [Defense Mechanisms](#-defense-mechanisms)
+- [Victim Scenario](#-victim-scenario)
 - [Compliance Mapping](#-compliance-mapping)
-- [Troubleshooting](#-troubleshooting)
 - [References](#-references)
-- [Author](#-author)
 
 ---
 
 ## 📖 Overview
 
-This project is an **academic security lab** demonstrating a **Man-In-The-Middle (MITM)** attack on an Android application using a forged CA certificate (Burp Suite CA).
+This lab demonstrates **three real-world Android security vulnerabilities** and their fixes:
 
-The lab simulates a real-world attack scenario where a malicious actor installs a fake Certificate Authority into an Android device, intercepting HTTPS traffic and stealing user credentials in plaintext — even though the connection appears secure (HTTPS with padlock icon).
+| ID | Vulnerability | Severity | Status |
+|----|--------------|----------|--------|
+| VULN-001 | Insecure Communication — Fake CA accepted via MITM | 🔴 CRITICAL | FIXED |
+| VULN-002 | Insecure Data Storage — JWT token stored as plaintext | 🟠 HIGH | FIXED |
+| VULN-003 | Missing MFA — OTP bypassed via MITM relay attack | 🟡 MEDIUM | PARTIAL |
 
-### Demo Phases:
-| Phase | Description |
-|-------|-------------|
-| **2.1 — The Hack** | Install Burp CA → Configure proxy → Intercept HTTPS → Steal credentials |
-| **2.2 — Security Hardening** | Apply Network Security Config → Trust System CAs only |
-| **2.3 — Proof of Defense** | Re-attack → App throws SSLHandshakeException → No data intercepted |
-
-### Vulnerability Exploited:
-> **OWASP Mobile Top 10 - M3: Insecure Communication**
-> The app accepts User-installed CA certificates, allowing an attacker to perform MITM and read credentials in plaintext despite HTTPS being used.
+**Key insight:** The victim **voluntarily types their own credentials** — they are never forced or coerced. MITM is invisible. The padlock icon still shows green. The victim has no idea they are being watched.
 
 ---
 
-## 🗂️ Project Structure
+## 🗂️ Repository Structure
+
+This project spans **two repositories** and **three branches**:
 
 ```
-Project4_MITM_Lab/
+GitHub
 │
-├── 📁 dummy-server/                # Node.js HTTPS dummy server
-│   ├── server.js                   # HTTPS server with self-signed cert
-│   └── package.json
+├── Repo: Project4-MITM-Security-Information
+│   └── branch: main
+│       ├── dummy-server/
+│       │   ├── server.js           # Vulnerable HTTPS server (Trust All, no expiry)
+│       │   ├── server_hard.js      # Hardened server (TLS 1.2+, HSTS, rate limit, token expiry)
+│       │   ├── cert.pem            # Fixed self-signed cert (generated once, reused)
+│       │   └── key.pem
+│       ├── python-tools/
+│       │   ├── utils/
+│       │   │   ├── logger.py       # Rich terminal logging
+│       │   │   └── adb_helper.py   # ADB command wrapper
+│       │   ├── 01_check_env.py     # Environment verifier
+│       │   ├── 02_capture_traffic.py  # Traffic analyzer (HAR + phase simulation)
+│       │   ├── 03_storage_audit.py    # Token storage auditor (attack/defense phases)
+│       │   └── 04_security_audit_v2.py  # HTML report generator
+│       └── reports/
+│           └── final_report.html   # Auto-generated security audit report
 │
-├── 📁 python-tools/                # Analysis & reporting tools
-│   ├── 📁 utils/
-│   │   ├── __init__.py
-│   │   ├── logger.py               # Rich logging utility
-│   │   └── adb_helper.py           # ADB command wrapper
-│   ├── requirements.txt
-│   ├── 01_check_env.py             # Environment checker
-│   ├── 02_capture_traffic.py       # Traffic analyzer
-│   └── 04_security_audit.py        # HTML report generator
-│
-├── 📁 reports/                     # Auto-generated reports
-│   └── 📁 raw_logs/
-│
-└── README.md
-```
-
-> **Android App** is stored separately at: [MITMDemo-Android](https://github.com/tienhardinng/MITMDemo-Android)# 🎬 DEMO RUNBOOK — Android MITM Attack Lab
-### Complete Guide for Fresh Start / New Machine
-
----
-
-## ⚡ QUICK CHECKLIST (Print this out!)
-
-```
-PRE-DEMO (15 phút trước):
-[ ] 1. Start Burp Suite
-[ ] 2. Start node server.js  
-[ ] 3. Start Android Studio + AVD
-[ ] 4. Verify Burp CA installed on AVD
-[ ] 5. Verify AVD proxy configured
-[ ] 6. Build & install app on AVD
-[ ] 7. Test login once to confirm working
-
-DEMO ORDER:
-[ ] Phase 2.1 — Show password stolen in Burp
-[ ] Phase 2.2 — Fix: change network_security_config.xml
-[ ] Phase 2.3 — Re-attack: SSLHandshakeException
-[ ] Certificate Pinning demo
-[ ] Run Python tools + show HTML report
+└── Repo: Project4-MITM-Lab  (Android App)
+    ├── branch: android-vulnerable   ← HACK version
+    │   ├── MainActivity.kt          # Trust ALL certs, saves token to plaintext file
+    │   └── network_security_config.xml  # Accepts User CA (src="user")
+    │
+    └── branch: android-hardened     ← DEFENSE version
+        ├── MainActivity.kt          # EncryptedSharedPreferences, no Trust All
+        └── network_security_config.xml  # System CA only, no User CA
 ```
 
 ---
 
-## 📦 PART 1 — ONE-TIME SOFTWARE INSTALLATION
+## 💻 Prerequisites
 
-### 1.1 Python 3.10+
-- Download: https://python.org/downloads
-- ✅ CHECK "Add Python to PATH" during install
-```powershell
-# Verify
-python --version
-# Expected: Python 3.10.x or higher
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Python | ≥ 3.10 | Analysis scripts & report generation |
+| Node.js | ≥ 18 LTS | Dummy HTTPS server |
+| Android Studio | Latest | Build & run Android app |
+| Burp Suite Community | Latest | MITM proxy / traffic interception |
+| ADB (Android SDK) | Latest | Token extraction demo |
+| Git | Any | Branch switching between vulnerable/hardened |
+
+**Android Virtual Device:**
 ```
-
-### 1.2 Node.js 18 LTS
-- Download: https://nodejs.org (choose LTS)
-```powershell
-# Verify
-node --version    # v18.x.x or higher
-npm --version     # 9.x.x or higher
-```
-
-### 1.3 Android Studio
-- Download: https://developer.android.com/studio
-- Install with default settings
-- On first launch → install Android SDK when prompted
-```powershell
-# Verify ADB
-adb version
-# If not found, add to PATH:
-# C:\Users\YOUR_NAME\AppData\Local\Android\Sdk\platform-tools
-```
-
-### 1.4 Burp Suite Community Edition
-- Download: https://portswigger.net/burp/communitydownload
-- Install with default settings
-
-### 1.5 Git
-- Download: https://git-scm.com
-```powershell
-git --version
+Device  : Pixel 6
+API     : 34 (Android 14)
 ```
 
 ---
 
-## 📥 PART 2 — ONE-TIME PROJECT SETUP
+## ⚙️ Setup Guide
 
-### 2.1 Clone repos
-```powershell
-cd C:\Users\YOUR_NAME\Downloads
+### Step 1 — Clone repositories
 
-# Clone Python tools + Server
+```bash
+# Python tools + Server
 git clone https://github.com/tienhardinng/Project4-MITM-Security-Information.git
 cd Project4-MITM-Security-Information
-```
-
-### 2.2 Install Python dependencies
-```powershell
-# Inside Project4-MITM-Security-Information folder
 pip install -r python-tools/requirements.txt
+cd dummy-server && npm install && cd ..
+
+# Android App
+git clone https://github.com/tienhardinng/Project4-MITM-Lab.git
 ```
 
-### 2.3 Install Node.js dependencies
-```powershell
-cd dummy-server
-npm install
-cd ..
-```
-
-### 2.4 Open Android project in Android Studio
-```
-Android Studio → Open → Select MITMDemo folder
-Wait for Gradle sync (5-10 minutes first time)
-```
-
-### 2.5 Create AVD (one time only)
+### Step 2 — Create AVD
 ```
 Android Studio → Tools → Device Manager → +
-Device   : Pixel 6
-API      : 34 (Android 14) → Download if needed
-→ Next → Finish
+Device: Pixel 6 | API: 34 → Finish
+```
+
+### Step 3 — Install Burp CA into AVD (one-time)
+```
+1. Burp Suite → Proxy → Proxy Settings
+   → Export CA Certificate → DER format → save cacert.der
+
+2. adb -s emulator-5554 push cacert.der /sdcard/Download/cacert.der
+
+3. AVD: Settings → Security → Encryption & Credentials
+   → Install a certificate → CA certificate → cacert.der
+
+4. Verify: Settings → Trusted Credentials → User tab → "PortSwigger" ✓
+```
+
+### Step 4 — Configure AVD Proxy
+```
+AVD: Settings → Network & Internet → Wi-Fi → AndroidWifi ✏️
+→ Proxy: Manual | Host: 10.0.2.2 | Port: 8080 → Save
 ```
 
 ---
 
-## 🔐 PART 3 — ONE-TIME BURP CA SETUP
+## 🎬 Demo Walkthrough
 
-### 3.1 Open Burp Suite
-```
-Launch Burp Suite
-→ Temporary project → Next
-→ Use Burp defaults → Start Burp
-```
+### Startup Sequence (every demo session)
 
-### 3.2 Verify Proxy listener
-```
-Proxy → Proxy Settings → Proxy Listeners
-→ Must show: 127.0.0.1:8080 Running ✓
-→ If missing: Add → Port: 8080 → OK
-```
-
-### 3.3 Export Burp CA Certificate
-```
-Proxy → Proxy Settings
-→ Import/export CA certificate
-→ Export → Certificate in DER format → Next
-→ Save as: C:\Users\YOUR_NAME\Downloads\cacert.der
-```
-
-### 3.4 Start AVD first
-```
-Android Studio → Device Manager → ▶ Play (Pixel 6)
-Wait for AVD to fully boot
-```
-
-### 3.5 Push CA to AVD
 ```powershell
-# Check which emulator is running
-adb devices
-# Expected: emulator-5556    device
-
-# Push certificate
-adb -s emulator-5556 push C:\Users\YOUR_NAME\Downloads\cacert.der /sdcard/Download/cacert.der
-# Expected: 1 file pushed
-```
-
-### 3.6 Install CA on AVD
-On AVD screen:
-```
-Settings
-→ Security & Privacy
-→ More Security Settings
-→ Encryption & Credentials
-→ Install a certificate
-→ CA certificate
-→ Install Anyway
-→ Select cacert.der from Downloads
-```
-
-Verify:
-```
-Settings → Security → Trusted Credentials → USER tab
-→ Must see: "PortSwigger" ✓
-```
-
-### 3.7 Configure AVD Proxy
-On AVD screen:
-```
-Settings
-→ Network & Internet
-→ Wi-Fi
-→ AndroidWifi → click ⚙️ gear icon
-→ Edit ✏️ (pencil icon top right)
-→ Advanced Options
-→ Proxy: Manual
-→ Proxy hostname: 10.0.2.2
-→ Proxy port: 8080
-→ Save
-```
-
----
-
-## 🔑 PART 4 — GET CERTIFICATE PIN (One time per machine)
-
-### 4.1 Start server to generate cert
-```powershell
-cd C:\Users\YOUR_NAME\Downloads\Project4-MITM-Security-Information\dummy-server
+# Terminal 1 — Start vulnerable server
+cd dummy-server
 node server.js
-```
+# → [SERVER] HTTPS Listening on port 3000
 
-First run output:
-```
-[SERVER] Generated and saved new certificate
-[SERVER] Certificate SHA-256 Pin: sha256/XXXX...   ← COPY THIS!
-[SERVER] HTTPS Listening on port 3000
-```
-
-> ⚠️ If shows "Loaded existing certificate" → cert.pem already exists, hash is fixed.
-> Run this to get hash:
-```powershell
-node -e "
-const crypto = require('crypto');
-const forge = require('node-forge');
-const fs = require('fs');
-const pemCert = fs.readFileSync('cert.pem', 'utf8');
-const cert = forge.pki.certificateFromPem(pemCert);
-const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
-const derBuffer = Buffer.from(publicKeyDer, 'binary');
-const hash = crypto.createHash('sha256').update(derBuffer).digest('base64');
-console.log('sha256/' + hash);
-"
-```
-
-### 4.2 Update pin in Android app
-Open `MainActivity.kt` in Android Studio:
-```kotlin
-// Find this line and update hash:
-private const val SERVER_PIN = "sha256/PASTE_YOUR_HASH_HERE="
-```
-
-> 💡 If pinning fails, the error message shows "Got: sha256/XXXX" — use THAT hash!
-
----
-
-## 🎬 PART 5 — DEMO EXECUTION (Every time)
-
-### ═══ STARTUP SEQUENCE ═══
-
-**Step 1 — Terminal 1: Start Server**
-```powershell
-cd C:\Users\YOUR_NAME\Downloads\Project4-MITM-Security-Information\dummy-server
-node server.js
-# Must see: [SERVER] HTTPS Listening on port 3000
-# KEEP THIS TERMINAL OPEN!
-```
-
-**Step 2 — Burp Suite**
-```
-Open Burp Suite → Temporary project → Start Burp
-Proxy → Intercept → Intercept is OFF
-Proxy → HTTP History (keep this tab open)
-```
-
-**Step 3 — Android Studio: Start AVD**
-```
-Tools → Device Manager → ▶ Play (Pixel 6)
-Wait for AVD to fully boot
-```
-
-**Step 4 — Android Studio: Build & Install App**
-```
-Press Shift+F10  (or click ▶ green Run button)
-Wait for build and install (~1-2 minutes)
-App will auto-launch on AVD
-```
-
-**Step 5 — Verify setup**
-```
-AVD: Open Settings → Security → Trusted Credentials → User
-→ Must see PortSwigger ✓
-
-AVD: Settings → Network → Wi-Fi → AndroidWifi
-→ Must show proxy 10.0.2.2:8080 ✓
-```
-
----
-
-### ═══ PHASE 2.1 — THE HACK ═══
-
-**Goal: Show password stolen in Burp despite HTTPS**
-
-1. On AVD, open MITMDemo app
-2. Enter credentials:
-   ```
-   Username: admin
-   Password: Secret@123
-   ```
-3. Tap **Login**
-4. Switch to Burp Suite → HTTP History tab
-5. Find row with `POST /api/login` → click it
-6. Bottom panel shows:
-   ```
-   POST /api/login HTTP/1.1
-   Host: 10.0.2.2:3000
-   ...
-   {"username":"admin","password":"Secret@123"}
-   ```
-
-**📸 SCREENSHOT THIS — Evidence of attack!**
-
----
-
-### ═══ PHASE 2.2 — SECURITY HARDENING ═══
-
-**Goal: Apply Network Security Config**
-
-In Android Studio, open:
-`app/src/main/res/xml/network_security_config.xml`
-
-Change to (remove `src="user"`):
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-</network-security-config>
-```
-
-Rebuild: **Shift+F10**
-
----
-
-### ═══ PHASE 2.3 — PROOF OF DEFENSE ═══
-
-**Goal: Show attack fails after hardening**
-
-1. Keep Burp CA still installed on AVD
-2. Keep proxy still pointing to Burp
-3. Login again on AVD
-4. AVD shows: `SSLHandshakeException` ✓
-5. Burp HTTP History: No new request ✓
-
-**📸 SCREENSHOT BOTH — Evidence of defense!**
-
----
-
-### ═══ CERTIFICATE PINNING DEMO ═══
-
-**Goal: Show advanced protection against System CA attacks**
-
-App already has Certificate Pinning in `MainActivity.kt`:
-```kotlin
-private const val SERVER_PIN = "sha256/YOUR_HASH"
-```
-
-**How it works:**
-- Even if attacker installs CA into System store
-- App checks certificate hash directly
-- Any cert mismatch → connection refused immediately
-
-**Demo:**
-1. Login with correct server running → Success ✓
-2. Stop server → Start different server (different cert)
-3. Login → `Certificate pinning failed!` ✓
-
----
-
-### ═══ PYTHON TOOLS ═══
-
-**Terminal 2** (new terminal, keep server running in Terminal 1):
-```powershell
-cd C:\Users\YOUR_NAME\Downloads\Project4-MITM-Security-Information
+# Terminal 2 — Keep for ADB + Python commands
+cd Project4-MITM-Security-Information
 $env:PYTHONPATH = "python-tools"
 
-# Step 1: Check environment
+# Android Studio → ▶ Run (Shift+F10) to build & install app
+```
+
+---
+
+### 🔴 PHASE 1 — ATTACK: MITM Credential Theft (VULN-001)
+
+**App branch:** `android-vulnerable`
+```powershell
+cd Project4-MITM-Lab
+git checkout android-vulnerable
+# Android Studio → Shift+F10
+```
+
+**Demo steps:**
+1. Burp Suite → Proxy → `Intercept is OFF`
+2. Open app on AVD → Enter `admin / Secret@123` → tap **Login**
+3. Burp → HTTP History → click `POST /api/login` → **Response** tab
+4. Credentials visible in plaintext:
+```json
+{"username": "admin", "password": "Secret@123"}
+```
+5. Response also contains OTP (VULN-003):
+```json
+{"mfa": {"otp_generated": "847291", "expires_in": 30}}
+```
+
+**📸 Screenshot: Burp HTTP History showing password in plaintext**
+
+---
+
+### 🔴 PHASE 2 — ATTACK: Token Theft via ADB (VULN-002)
+
+**While still on `android-vulnerable` branch:**
+
+```powershell
+# Read JWT token directly from app storage — no root required
+adb -s emulator-5554 shell run-as com.demo.mitm cat /data/data/com.demo.mitm/files/token.txt
+# → eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRtaW4ifQ.secret123
+
+# Replay stolen token → access API without password
+node -e "
+const https = require('https');
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const req = https.request({
+  hostname: '127.0.0.1', port: 3000, path: '/api/profile', method: 'GET',
+  headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRtaW4ifQ.secret123' }
+}, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>console.log(d)); });
+req.end();
+"
+# → {"status":"ok","username":"admin","role":"admin"}
+```
+
+**📸 Screenshot: ADB reads token + API returns 200 OK with stolen token**
+
+---
+
+### 🟢 PHASE 3 — DEFENSE: Network Security Config (VULN-001 Fix)
+
+**Switch to hardened branch:**
+```powershell
+git checkout android-hardened
+# Android Studio → Shift+F10
+```
+
+**Demo steps:**
+1. Keep Burp CA still installed on AVD
+2. Keep proxy still pointing to Burp
+3. Login again on AVD → app shows:
+```
+CertPathValidatorException: Trust anchor for certification path not found
+```
+4. Burp HTTP History → **no new request** — 0 bytes intercepted
+
+**📸 Screenshot: SSLHandshakeException on AVD + empty Burp history**
+
+---
+
+### 🟢 PHASE 4 — DEFENSE: Token Storage Fix (VULN-002 Fix)
+
+**Switch to hardened server:**
+```powershell
+# Ctrl+C stop server.js
+node server_hard.js
+# → TLS 1.2+, HSTS, token expiry 15 min
+```
+
+```powershell
+# Verify token.txt no longer exists
+adb -s emulator-5554 shell run-as com.demo.mitm cat /data/data/com.demo.mitm/files/token.txt
+# → cat: No such file or directory  ✓
+
+# Old token rejected by server_hard.js
+node -e "... same replay request ..."
+# → 401 Unauthorized — token expired  ✓
+```
+
+**📸 Screenshot: No such file + 401 Unauthorized**
+
+---
+
+### 📊 PHASE 5 — Generate Report
+
+```powershell
+cd Project4-MITM-Security-Information
+$env:PYTHONPATH = "python-tools"
+
+# Environment check
 python python-tools/01_check_env.py
 
-# Step 2: Show vulnerable phase analysis
-python python-tools/02_capture_traffic.py --phase vulnerable --file reports/raw_logs/captured.har
+# Storage audit
+python python-tools/03_storage_audit.py --phase attack
+python python-tools/03_storage_audit.py --phase defense
 
-# Step 3: Show hardened phase analysis  
-python python-tools/02_capture_traffic.py --phase hardened
-
-# Step 4: Generate HTML report
-python python-tools/04_security_audit.py
-
-# Step 5: Open report in browser
+# Generate HTML report
+python python-tools/04_security_audit_v2.py
 start reports/final_report.html
 ```
 
 ---
 
-## 🔄 PART 6 — RESTART AFTER CLOSING EVERYTHING
+## ⚔️ Attack Mechanics
 
-If you closed all apps and need to restart:
+### How MITM Works (VULN-001)
 
 ```
-ORDER MATTERS!
+Victim's Phone              Hacker (Burp Suite)          Real Server
+      │                            │                           │
+      │── POST /api/login ────────▶│                           │
+      │   {user, pass}             │──── relay ───────────────▶│
+      │                            │◀─── response + OTP ───────│
+      │◀── {token, otp_hint} ──────│                           │
+      │                            │                           │
+      │                    Hacker sees:                        │
+      │                    - username + password               │
+      │                    - JWT token                         │
+      │                    - OTP (if MFA enabled)              │
+```
 
-1. Start Burp Suite first
-   → Temporary project → Start Burp
-   → Verify 127.0.0.1:8080 listening
+**Why it works:** Android allows User-installed CAs by default. Burp acts as a "trusted" CA between the app and the real server. The app encrypts data to Burp's fake certificate — thinking it's talking to the real server.
 
-2. Start server (Terminal 1)
-   cd dummy-server
-   node server.js
+### How Token Theft Works (VULN-002)
 
-3. Start AVD
-   Android Studio → Device Manager → ▶ Pixel 6
+```
+Physical access / USB cable
+        ↓
+adb shell run-as com.demo.mitm
+        ↓
+cat /data/data/com.demo.mitm/files/token.txt
+        ↓
+JWT token in plaintext
+        ↓
+curl -H "Authorization: Bearer <token>" /api/profile
+        ↓
+Full account access — no password needed
+        ↓
+Token works indefinitely (no expiry in vulnerable server)
+```
 
-4. Build app
-   Shift+F10
+### MFA Bypass Timeline (VULN-003)
 
-5. Verify AVD proxy still set
-   Settings → Wi-Fi → AndroidWifi → check proxy
-   (Sometimes resets after AVD restart — redo Step 3.7 if needed)
-
-6. Ready to demo!
+```
+T+0s   Victim taps Login → POST /api/login intercepted
+T+0s   Server generates OTP → sent to victim's SMS
+T+0s   Hacker reads OTP from Burp response (otp_hint field)
+T+5s   Victim receives SMS, types OTP into app
+T+5s   POST /api/verify-otp intercepted → hacker reads OTP again
+T+6s   Hacker relays OTP to server before victim's request
+T+6s   Server issues token to hacker
+T+30s  OTP expires — but hacker already has the token
 ```
 
 ---
 
-## ❗ TROUBLESHOOTING
+## 🛡️ Defense Mechanisms
 
-| Problem | Fix |
-|---------|-----|
-| `adb: more than one device` | `adb -s emulator-5556 push ...` |
-| Server port 3000 in use | `netstat -ano \| findstr :3000` → `taskkill /PID XXXX /F` |
-| Burp not intercepting | Re-check AVD proxy: 10.0.2.2:8080 |
-| `CertPathValidatorException` | Burp CA not installed → redo Part 3 |
-| Certificate pinning failed | Use hash from "Got: sha256/XXXX" in error message |
-| AVD proxy reset | Redo Step 3.7 after each AVD restart |
-| Gradle sync failed | Delete `.gradle/caches` → re-sync |
-| App not updating | Build → Clean Project → Shift+F10 |
+### VULN-001 Fix — Network Security Config
+
+```xml
+<!-- VULNERABLE: accepts Burp CA -->
+<certificates src="system" />
+<certificates src="user" />   ← remove this line
+
+<!-- HARDENED: System CAs only -->
+<certificates src="system" />
+```
+
+Result: `SSLHandshakeException` — connection terminated before any data is sent.
+
+### VULN-002 Fix — EncryptedSharedPreferences
+
+```kotlin
+// VULNERABLE: plaintext file
+File(filesDir, "token.txt").writeText(token)
+
+// HARDENED: AES-256-GCM via Android Keystore
+val prefs = EncryptedSharedPreferences.create(
+    "secure_prefs",
+    MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
+    context,
+    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+)
+prefs.edit().putString("token", token).apply()
+```
+
+### Before vs After
+
+| Security Feature | Vulnerable | Hardened |
+|-----------------|-----------|----------|
+| Block User CA | ❌ Accepts all | ✅ System CA only |
+| Certificate Pinning | ❌ None | ✅ SHA-256 pin |
+| Cleartext HTTP | ❌ Allowed | ✅ Blocked |
+| Token storage | ❌ Plaintext file | ✅ EncryptedSharedPreferences |
+| Token expiry | ❌ Never expires | ✅ 15 minutes |
+| TLS version | ❌ Any | ✅ TLS 1.2+ only |
+| HSTS header | ❌ None | ✅ max-age=31536000 |
+| Proxy detection | ❌ None | ✅ Suspicious header logging |
 
 ---
 
-## 📊 DEMO SCRIPT (What to say)
+## 👤 Victim Scenario
 
-### Phase 2.1:
-> "This app sends login credentials over HTTPS — normally considered secure.
-> However, because the app accepts User-installed CA certificates,
-> we can install Burp Suite's fake CA and intercept all traffic.
-> Watch — I enter admin/Secret@123 and tap Login.
-> In Burp, we can see the password in plaintext despite HTTPS."
+**The victim never knows they are being attacked.**
 
-### Phase 2.3:
-> "After applying Network Security Config with only System CAs trusted,
-> the app now rejects Burp's fake certificate.
-> Same credentials, same Burp setup — but now we get SSLHandshakeException.
-> Burp receives nothing. The attack completely fails."
+> Sarah is having coffee at a café. She connects to the free Wi-Fi "Coffee_Free_WiFi" — which is actually a rogue access point set up by an attacker nearby.
+>
+> She opens her banking app, which shows a green HTTPS padlock. She types her username and password, then taps Login. The app shows "Login successful."
+>
+> Meanwhile, on the attacker's laptop, Burp Suite has just logged:
+> `{"username": "sarah@bank.com", "password": "MyP@ss2024"}`
+>
+> Later, the attacker plugs a USB cable into the charging port at the café table (a common "juice jacking" setup) and runs `adb shell run-as` to extract her JWT token — then accesses her account from anywhere in the world.
 
-### Certificate Pinning:
-> "Certificate Pinning goes further — even if an attacker compromises
-> a System CA, the app hardcodes the exact server certificate hash.
-> Any certificate mismatch immediately terminates the connection."
+**Why MITM is dangerous:**
+- Victim **voluntarily types** their own credentials
+- App shows a **valid HTTPS padlock** — no warning
+- Attack is **completely silent** — no alerts, no notifications
+- Works on **any public Wi-Fi** where proxy can be configured
 
 ---
 
-*Last updated: Project 4 — MITM Attack Lab*
-*Author: Tien Hardinng | github.com/tienhardinng*
+## 📊 Compliance Mapping
+
+| Standard | Clause | Violation | Fix Applied |
+|---------|--------|-----------|-------------|
+| OWASP Mobile Top 10 | M3: Insecure Communication | App accepts User CA → MITM possible | Network Security Config |
+| OWASP Mobile Top 10 | M9: Insecure Data Storage | JWT token in plaintext file | EncryptedSharedPreferences |
+| OWASP Mobile Top 10 | M4: Insufficient Authentication | No MFA, OTP bypassable via MITM | Certificate Pinning first |
+| ISO/IEC 27002:2022 | 8.24 — Use of cryptography | TLS misconfigured | TLS 1.2+, cert pinning |
+| ISO/IEC 27002:2022 | 8.26 — Application security | Insecure design | Secure coding practices |
+| ISO/IEC 27002:2022 | 8.10 — Information deletion | Token persists after logout | Token expiry + secure storage |
+| GDPR Article 32 | Security of processing | Data in transit unprotected | Network Security Config |
+| GDPR Article 32 | Security of processing | Data at rest unprotected | EncryptedSharedPreferences |
+
+---
+
+## 📚 References
+
+- [OWASP Mobile Security Testing Guide (MSTG) 2024](https://owasp.org/www-project-mobile-security-testing-guide/)
+- [OWASP Mobile Top 10](https://owasp.org/www-project-mobile-top-10/)
+- [Android Network Security Configuration](https://developer.android.com/privacy-and-security/network-security-config)
+- [Android EncryptedSharedPreferences](https://developer.android.com/reference/androidx/security/crypto/EncryptedSharedPreferences)
+- [ISO/IEC 27002:2022](https://www.iso.org/standard/75652.html)
+- [GDPR Article 32](https://gdpr-info.eu/art-32-gdpr/)
+- [PortSwigger — Burp Suite CA on Android](https://portswigger.net/burp/documentation/desktop/mobile-testing)
+
+---
+
+> ⚠️ **Disclaimer:** This project is created strictly for academic and security research purposes.
+> Do not use any techniques demonstrated here against real systems without explicit written authorization.
